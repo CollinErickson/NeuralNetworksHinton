@@ -156,7 +156,7 @@ function ret = d_loss_by_d_model(model, data, wd_coefficient)
   %-mean(sum(grad_log_class_prob .* data.targets, 1));
   
   % restarting calcs using shortcut
-  if 1
+  if false
 
       % Before we can calculate the loss, we need to calculate a variety of intermediate values, like the state of the hidden units.
       hid_input = model.input_to_hid * data.inputs; % input to the hidden units, i.e. before the logistic. size: <number of hidden units> by <number of data cases>
@@ -180,23 +180,38 @@ function ret = d_loss_by_d_model(model, data, wd_coefficient)
       %mabs = dE_ds * 1;
   
   end
-  % adding all the intermediate calculations
+  
+  if false
+      % adding all the intermediate calculations
+      hid_input = model.input_to_hid * data.inputs; % input to the hidden units, i.e. before the logistic. size: <number of hidden units> by <number of data cases>
+      hid_output = logistic(hid_input); % output of the hidden units, i.e. after the logistic. size: <number of hidden units> by <number of data cases>
+      class_input = model.hid_to_class * hid_output; % input to the components of the softmax. size: <number of classes, i.e. 10> by <number of data cases>
+      dhout_dtheta = data.inputs * (logistic(hid_input)' .* (1-logistic(hid_input))') * model.hid_to_class' ;
+      dCI_dtheta_h2c = hid_output;
+      %dCI_dtheta_i2h = model.hid_to_class'  * dhout_dtheta'; % do I need tranpose of this (ie remove both ')?
+      dCN_dtheta_h2c = sum(exp(class_input * dCI_dtheta_h2c'), 2) ./ sum(exp(class_input), 2);
+      %dCN_dtheta_i2h = sum(exp(class_input * dCI_dtheta_i2h'), 2) ./ sum(exp(class_input), 2);
+      dlcp_dtheta_h2c = dCI_dtheta_h2c - dCN_dtheta_h2c;
+      dlcp_dtheta_i2h = dCI_dtheta_i2h - dCN_dtheta_i2h;
+      dl_dtheta_i2h = -mean(dlcp_dtheta_i2h * data.target);
+      dl_dtheta_h2c = -mean(dlcp_dtheta_h2c * data.target);
+      ret.input_to_hid = ret.input_to_hid + dl_dtheta_i2h;
+      ret.hid_to_class = ret.hid_to_class + dl_dtheta_h2c;
+  end
+  
+  
   hid_input = model.input_to_hid * data.inputs; % input to the hidden units, i.e. before the logistic. size: <number of hidden units> by <number of data cases>
   hid_output = logistic(hid_input); % output of the hidden units, i.e. after the logistic. size: <number of hidden units> by <number of data cases>
   class_input = model.hid_to_class * hid_output; % input to the components of the softmax. size: <number of classes, i.e. 10> by <number of data cases>
-  dhout_dtheta = data.inputs * (logistic(hid_input)' .* (1-logistic(hid_input))') * model.hid_to_class' ;
-  dCI_dtheta_h2c = hid_output;
-  %dCI_dtheta_i2h = model.hid_to_class'  * dhout_dtheta'; % do I need tranpose of this (ie remove both ')?
-  dCN_dtheta_h2c = sum(exp(class_input * dCI_dtheta_h2c'), 2) ./ sum(exp(class_input), 2);
-  %dCN_dtheta_i2h = sum(exp(class_input * dCI_dtheta_i2h'), 2) ./ sum(exp(class_input), 2);
-  dlcp_dtheta_h2c = dCI_dtheta_h2c - dCN_dtheta_h2c;
-  dlcp_dtheta_i2h = dCI_dtheta_i2h - dCN_dtheta_i2h;
-  dl_dtheta_i2h = -mean(dlcp_dtheta_i2h * data.target);
-  dl_dtheta_h2c = -mean(dlcp_dtheta_h2c * data.target);
-  
-  
-  ret.input_to_hid = ret.input_to_hid + dl_dtheta_i2h;
-  ret.hid_to_class = ret.hid_to_class + dl_dtheta_h2c;
+  class_normalizer = log_sum_exp_over_rows(class_input);
+  log_class_prob = class_input - repmat(class_normalizer, [size(class_input, 1), 1]);
+  class_output = exp(log_class_prob);
+  m = size(data.inputs, 2);
+
+  errs = class_output - data.targets;
+  hidden_errs = (model.hid_to_class' * errs) .* (logistic(hid_input) .* (1-logistic(hid_input)));
+  ret.input_to_hid = ret.input_to_hid + 1/m * (hidden_errs * data.inputs');
+  ret.hid_to_class = ret.hid_to_class + 1/m * (errs * hid_output');
 end
 
 function ret = model_to_theta(model)
